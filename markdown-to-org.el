@@ -82,7 +82,68 @@ The conversion is done in a specific order to handle nested structures correctly
     ;; Step 1: Block-level conversions
     ;; -------------------------------
 
+    ;; Convert YAML frontmatter to org properties
+    (goto-char (point-min))
+    (when (looking-at "^---[ \t]*\n")
+      (let ((fm-start (point))
+            (properties '())
+            (current-key nil)
+            (current-values '()))
+        (forward-line 1)
+        ;; Buscar el cierre del frontmatter
+        (when (re-search-forward "^---[ \t]*\n" nil t)
+          (let ((fm-end (point)))
+            ;; Procesar línea por línea
+            (goto-char fm-start)
+            (forward-line 1)
+            (while (< (point) fm-end)
+              (let ((line (buffer-substring-no-properties 
+                          (line-beginning-position) 
+                          (line-end-position))))
+                (cond
+                 ;; Línea con clave: valor
+                 ((string-match "^\\([a-zA-Z0-9_-]+\\):[ \t]*\\(.*\\)$" line)
+                  ;; Guardar la propiedad anterior si existe
+                  (when current-key
+                    (let ((final-value (if (> (length current-values) 1)
+                                           (mapconcat 'identity (reverse current-values) ", ")
+                                         (car current-values))))
+                      (when (and final-value (not (string-empty-p final-value)))
+                        (push (cons current-key final-value) properties))))
+                  ;; Nueva propiedad
+                  (setq current-key (match-string 1 line))
+                  (let ((value (string-trim (match-string 2 line))))
+                    ;; Limpiar comillas y escapados de forma segura
+                    (setq value (replace-regexp-in-string "^\"+\\|\"+$" "" value))
+                    (setq value (replace-regexp-in-string "\\\\+" "" value))
+                    (setq current-values (if (string-empty-p value) '() (list value)))))
+                 ;; Línea de array (items con - )
+                 ((string-match "^[ \t]+-[ \t]+\"?\\([^\"]+\\)\"?[ \t]*$" line)
+                  (let ((item (string-trim (match-string 1 line))))
+                    (push item current-values)))
+                 ;; Línea del cierre ---
+                 ((string-match "^---[ \t]*$" line)
+                  nil)))
+              (forward-line 1))
+            ;; Guardar la última propiedad
+            (when current-key
+              (let ((final-value (if (> (length current-values) 1)
+                                     (mapconcat 'identity (reverse current-values) ", ")
+                                   (car current-values))))
+                (when (and final-value (not (string-empty-p final-value)))
+                  (push (cons current-key final-value) properties))))
+            ;; Eliminar el frontmatter YAML completo
+            (delete-region fm-start fm-end)
+            ;; Insertar como propiedades org al inicio
+            (goto-char (point-min))
+            (when properties
+              (insert ":PROPERTIES:\n")
+              (dolist (prop (reverse properties))
+                (insert (format ":%s: %s\n" (car prop) (cdr prop))))
+              (insert ":END:\n\n"))))))
+
     ;; Convert headers (# -> *) with proper spacing
+    ;; NO MODIFICADO - Este código ya funciona bien
     (goto-char (point-min))
     (while (re-search-forward "^\\(#+\\)\\([ \t]*\\)\\(.+\\)$" nil t)
       (let* ((hashes (match-string 1))
@@ -91,6 +152,11 @@ The conversion is done in a specific order to handle nested structures correctly
              (level (length hashes))
              (stars (make-string level ?*)))
         (replace-match (concat stars spaces content))))
+
+    ;; Convert horizontal rules (--- or *** or ___) to org format (-----)
+    (goto-char (point-min))
+    (while (re-search-forward "^\\(---+\\|\\*\\*\\*+\\|___+\\)[ \t]*$" nil t)
+      (replace-match "-----"))
 
     ;; Convert code blocks with language support
     (goto-char (point-min))
@@ -156,9 +222,12 @@ The conversion is done in a specific order to handle nested structures correctly
       (replace-match "/\\1/"))
 
     ;; Convert links [text](url) to [[url][text]]
+    ;; MEJORADO: Mejor captura de URLs
     (goto-char (point-min))
     (while (re-search-forward "\\[\\([^]]+\\)\\](\\([^)]+\\))" nil t)
-      (replace-match "[[\\2][\\1]]"))
+      (let ((text (match-string 1))
+            (url (match-string 2)))
+        (replace-match (format "[[%s][%s]]" url text))))
 
     ;; debug
     ;; (message "Final conversion result:\n%s" (buffer-string))
