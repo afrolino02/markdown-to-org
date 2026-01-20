@@ -98,8 +98,8 @@ The conversion is done in a specific order to handle nested structures correctly
             (forward-line 1)
             (while (< (point) fm-end)
               (let ((line (buffer-substring-no-properties 
-                          (line-beginning-position) 
-                          (line-end-position))))
+                           (line-beginning-position) 
+                           (line-end-position))))
                 (cond
                  ;; Línea con clave: valor
                  ((string-match "^\\([a-zA-Z0-9_-]+\\):[ \t]*\\(.*\\)$" line)
